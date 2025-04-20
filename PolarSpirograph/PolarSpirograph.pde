@@ -34,6 +34,12 @@ float p3Deg = 45.0; // Phase (degrees)
 float thetaMaxCycles = 10.0; // How many full 2*PI cycles for theta
 int numPoints = 2000;     // Resolution of the curve
 float lineWidth = 1.0;
+int numRepetitions = 1;   // Number of times to repeat the pattern radially
+
+// Spiral Repetition Parameters (NEW)
+boolean useSpiralRepetition = false;
+float spiralTotalDegrees = 360.0;
+float spiralAmplitude = 1.0; // Factor controlling radial spread relative to scaleFactor
 
 // --- Data Structures ---
 ArrayList<PVector> pathPoints; // Stores Cartesian points of the path
@@ -117,6 +123,28 @@ void setup() {
   cp5.addLabel("Line Width:").setPosition(10, currentY+4).setSize(labelW, inputH).setFont(labelFont).setColorValue(color(0));
   cp5.addTextfield("lineWidth").setPosition(inputX, currentY).setSize(inputW, inputH).setAutoClear(false).setValue(nf(lineWidth, 1, 2));
 
+  // Repetitions (NEW)
+  currentY += spacing;
+  cp5.addLabel("Repetitions:").setPosition(10, currentY+4).setSize(labelW, inputH).setFont(labelFont).setColorValue(color(0));
+  cp5.addTextfield("numRepetitions").setPosition(inputX, currentY).setSize(inputW, inputH).setAutoClear(false).setValue(""+numRepetitions);
+
+  // Spiral Repetition Controls (NEW)
+  currentY += spacing;
+  cp5.addToggle("useSpiralRepetition")
+     .setLabel("Use Spiral Repetition")
+     .setPosition(10, currentY)
+     .setSize(inputW+labelW+10, inputH) // Wider toggle
+     .setValue(useSpiralRepetition)
+     .setMode(ControlP5.SWITCH);
+
+  currentY += spacing;
+  cp5.addLabel("Spiral Total Deg:").setPosition(10, currentY+4).setSize(labelW, inputH).setFont(labelFont).setColorValue(color(0));
+  cp5.addTextfield("spiralTotalDegrees").setPosition(inputX, currentY).setSize(inputW, inputH).setAutoClear(false).setValue(nf(spiralTotalDegrees, 1, 1));
+
+  currentY += spacing;
+  cp5.addLabel("Spiral Amplitude:").setPosition(10, currentY+4).setSize(labelW, inputH).setFont(labelFont).setColorValue(color(0));
+  cp5.addTextfield("spiralAmplitude").setPosition(inputX, currentY).setSize(inputW, inputH).setAutoClear(false).setValue(nf(spiralAmplitude, 1, 2));
+
   // Buttons
   currentY += spacing + 10;
   cp5.addButton("regeneratePatternButton").setLabel("Regenerate").setPosition(10, currentY).setSize(100, inputH+5);
@@ -179,11 +207,27 @@ void draw() {
     stroke(0);
     strokeWeight(lineWidth);
     noFill();
-    beginShape();
-    for (PVector p : pathPoints) {
-      vertex(p.x, p.y);
+    for (int i = 0; i < numRepetitions; i++) {
+      pushMatrix(); // Save current transformation state
+      if (useSpiralRepetition && numRepetitions > 1) {
+        // Spiral placement
+        float spiralAngle = map(i, 0, numRepetitions, 0, radians(spiralTotalDegrees));
+        float spiralRadius = map(i, 0, numRepetitions, 0, spiralAmplitude * scaleFactor);
+        float tx = spiralRadius * cos(spiralAngle);
+        float ty = spiralRadius * sin(spiralAngle);
+        translate(tx, ty); // Apply translation for this repetition
+      } else if (numRepetitions > 1) {
+        // Circular placement (original rotation)
+        rotate(TWO_PI / numRepetitions * i); // Apply rotation for this repetition
+      } // else: numRepetitions is 1, no transform needed
+
+      beginShape();
+      for (PVector p : pathPoints) {
+        vertex(p.x, p.y);
+      }
+      endShape();
+      popMatrix(); // Restore previous transformation state
     }
-    endShape();
   }
   
   // Draw GUI - Reset matrix first to draw in screen space
@@ -215,11 +259,27 @@ void exportToSVG() {
   
   // Draw the path to SVG
   if (pathPoints != null && pathPoints.size() > 1) {
-    svg.beginShape();
-    for (PVector p : pathPoints) {
-      svg.vertex(p.x, p.y);
+    for (int i = 0; i < numRepetitions; i++) {
+      svg.pushMatrix(); // Save SVG transformation state
+      if (useSpiralRepetition && numRepetitions > 1) {
+        // Spiral placement for SVG
+        float spiralAngle = map(i, 0, numRepetitions, 0, radians(spiralTotalDegrees));
+        float spiralRadius = map(i, 0, numRepetitions, 0, spiralAmplitude * scaleFactor);
+        float tx = spiralRadius * cos(spiralAngle);
+        float ty = spiralRadius * sin(spiralAngle);
+        svg.translate(tx, ty); // Apply translation for this repetition
+      } else if (numRepetitions > 1) {
+        // Circular placement for SVG (original rotation)
+        svg.rotate(TWO_PI / numRepetitions * i); // Apply rotation for this repetition
+      } // else: numRepetitions is 1, no transform needed
+      
+      svg.beginShape();
+      for (PVector p : pathPoints) {
+        svg.vertex(p.x, p.y);
+      }
+      svg.endShape();
+      svg.popMatrix(); // Restore SVG transformation state
     }
-    svg.endShape();
   }
   
   svg.endDraw();
@@ -251,6 +311,12 @@ public void p3Deg(String val) { try { p3Deg = Float.parseFloat(val); needsRegen=
 public void thetaMaxCycles(String val) { try { thetaMaxCycles = max(0.1, Float.parseFloat(val)); needsRegen=true;} catch (NumberFormatException e){} finally { if(cp5!=null)((Textfield)cp5.getController("thetaMaxCycles")).setValue(nf(thetaMaxCycles,1,1));} }
 public void numPoints(String val) { try { numPoints = max(10, Integer.parseInt(val)); needsRegen=true;} catch (NumberFormatException e){} finally { if(cp5!=null)((Textfield)cp5.getController("numPoints")).setValue(""+numPoints);} }
 public void lineWidth(String val) { try { lineWidth = max(0.1, Float.parseFloat(val)); needsRegen=true;} catch (NumberFormatException e){} finally { if(cp5!=null)((Textfield)cp5.getController("lineWidth")).setValue(nf(lineWidth,1,2));} } // Line width change needs regen
+public void numRepetitions(String val) { try { numRepetitions = max(1, Integer.parseInt(val)); } catch (NumberFormatException e){} finally { if(cp5!=null)((Textfield)cp5.getController("numRepetitions")).setValue(""+numRepetitions);} } // Repetition change doesn't need path regen
+
+// Spiral Handlers (NEW)
+public void useSpiralRepetition(boolean val) { useSpiralRepetition = val; } // No regen needed
+public void spiralTotalDegrees(String val) { try { spiralTotalDegrees = Float.parseFloat(val); } catch (NumberFormatException e){} finally { if(cp5!=null)((Textfield)cp5.getController("spiralTotalDegrees")).setValue(nf(spiralTotalDegrees,1,1));} } // No regen needed
+public void spiralAmplitude(String val) { try { spiralAmplitude = Float.parseFloat(val); } catch (NumberFormatException e){} finally { if(cp5!=null)((Textfield)cp5.getController("spiralAmplitude")).setValue(nf(spiralAmplitude,1,2));} } // No regen needed
 
 // --- Button Handlers & Helpers ---
 public void regeneratePatternButton(int theValue) { needsRegen = true; }
