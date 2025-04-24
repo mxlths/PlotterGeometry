@@ -1,0 +1,307 @@
+# GEOMETRON ALGORITHM FRAMEWORK
+
+## Overview
+
+The Algorithm Framework is the core system that enables Geometron to support a variety of geometry generation techniques through a uniform interface. This document outlines the architecture, interfaces, and implementation details for algorithm plugins.
+
+## Key Design Goals
+
+1. **Uniformity**: Common interface across all algorithms
+2. **Extensibility**: Easy to add new algorithms
+3. **Performance**: Efficient geometry generation and caching
+4. **Separation of Concerns**: Distinct logic for parameters, generation, and rendering
+5. **Discoverability**: Self-describing parameters and controls
+
+## Core Components
+
+### 1. Base Algorithm Interface
+
+```python
+class GeometronAlgorithm:
+    """Base class for all geometry generation algorithms."""
+    
+    def get_name(self) -> str:
+        """Return the user-facing name of the algorithm."""
+        pass
+    
+    def get_category(self) -> str:
+        """Return the category this algorithm belongs to (2D, 3D, etc.)."""
+        pass
+        
+    def get_description(self) -> str:
+        """Return a user-friendly description of what this algorithm does."""
+        pass
+    
+    def get_parameters(self) -> List[ParameterDefinition]:
+        """Return a list of parameters this algorithm accepts."""
+        pass
+    
+    def create_parameter_ui(self, parent_widget) -> QWidget:
+        """Create and return a widget containing UI controls for this algorithm's parameters."""
+        pass
+    
+    def generate_geometry(self, parameters: Dict, progress_callback=None) -> GeometryCollection:
+        """Generate geometry based on the given parameters."""
+        pass
+    
+    def get_preview_image(self, width: int, height: int, parameters: Dict) -> QImage:
+        """Generate a preview thumbnail of the algorithm's output."""
+        pass
+    
+    def is_3d(self) -> bool:
+        """Return True if this algorithm generates 3D geometry."""
+        pass
+```
+
+### 2. Parameter System
+
+```python
+class ParameterType(Enum):
+    """Enumeration of parameter types supported by algorithms."""
+    INTEGER = 1
+    FLOAT = 2
+    BOOLEAN = 3
+    CHOICE = 4
+    COLOR = 5
+    VECTOR2D = 6
+    VECTOR3D = 7
+    TEXT = 8
+    ANGLE = 9
+    
+class ParameterDefinition:
+    """Definition of a single parameter for an algorithm."""
+    def __init__(
+        self,
+        name: str,
+        display_name: str,
+        parameter_type: ParameterType,
+        default_value,
+        min_value=None,
+        max_value=None,
+        choices=None,
+        step=None,
+        description=None,
+        unit=None,
+        advanced=False,
+    ):
+        # Initialize parameter properties
+        pass
+```
+
+### 3. Geometry System
+
+```python
+class GeometryType(Enum):
+    """Types of geometry that can be generated."""
+    POINT = 1
+    LINE = 2
+    PATH = 3
+    SHAPE = 4
+
+class GeometryObject:
+    """Base class for all geometry objects."""
+    def __init__(self, geometry_type: GeometryType):
+        self.geometry_type = geometry_type
+        self.style = StyleAttributes()  # Line color, width, etc.
+        
+    def transform(self, matrix):
+        """Apply transformation matrix to this geometry."""
+        pass
+        
+    def to_svg_element(self) -> str:
+        """Convert this geometry to SVG element string."""
+        pass
+
+class Point(GeometryObject):
+    """A 2D or 3D point."""
+    def __init__(self, x, y, z=0):
+        super().__init__(GeometryType.POINT)
+        self.x = x
+        self.y = y
+        self.z = z
+
+class Line(GeometryObject):
+    """A line segment between two points."""
+    def __init__(self, start_point: Point, end_point: Point):
+        super().__init__(GeometryType.LINE)
+        self.start = start_point
+        self.end = end_point
+
+class Path(GeometryObject):
+    """A series of connected line segments."""
+    def __init__(self, points: List[Point], closed=False):
+        super().__init__(GeometryType.PATH)
+        self.points = points
+        self.closed = closed
+
+class GeometryCollection:
+    """Container for multiple geometry objects."""
+    def __init__(self):
+        self.objects = []
+        
+    def add(self, obj: GeometryObject):
+        self.objects.append(obj)
+        
+    def transform(self, matrix):
+        """Apply transformation to all contained geometry."""
+        for obj in self.objects:
+            obj.transform(matrix)
+```
+
+### 4. Algorithm Registry
+
+```python
+class AlgorithmRegistry:
+    """Central registry for available algorithms."""
+    
+    def __init__(self):
+        self.algorithms = {}
+        
+    def register_algorithm(self, algorithm_class):
+        """Register a new algorithm class."""
+        instance = algorithm_class()
+        self.algorithms[instance.get_name()] = algorithm_class
+        
+    def get_algorithm_instance(self, name):
+        """Get a new instance of an algorithm by name."""
+        if name in self.algorithms:
+            return self.algorithms[name]()
+        return None
+        
+    def get_algorithms_by_category(self, category):
+        """Get all algorithms in a specific category."""
+        return [algo for algo in self.algorithms.values() 
+                if algo().get_category() == category]
+        
+    def get_all_algorithms(self):
+        """Get all registered algorithms."""
+        return list(self.algorithms.values())
+```
+
+## Algorithm Implementation Pattern
+
+### Example: InterpolatedCircle Implementation
+
+```python
+class InterpolatedCircleAlgorithm(GeometronAlgorithm):
+    """Implementation of the Interpolated Circle algorithm."""
+    
+    def get_name(self):
+        return "Interpolated Circle"
+    
+    def get_category(self):
+        return "2D Patterns"
+        
+    def get_description(self):
+        return "Creates a circle with interpolated points and optional fluctuations."
+    
+    def get_parameters(self):
+        return [
+            ParameterDefinition(
+                name="n",
+                display_name="Number of Points",
+                parameter_type=ParameterType.INTEGER,
+                default_value=7,
+                min_value=3,
+                max_value=100,
+                description="Number of points around the circle"
+            ),
+            ParameterDefinition(
+                name="offset",
+                display_name="Radius Offset",
+                parameter_type=ParameterType.FLOAT,
+                default_value=2.0,
+                min_value=0.0,
+                max_value=10.0,
+                description="Offset for the radius"
+            ),
+            # Additional parameters...
+        ]
+    
+    def generate_geometry(self, parameters, progress_callback=None):
+        # Extract parameters
+        n = parameters.get("n", 7)
+        offset = parameters.get("offset", 2.0)
+        # Additional parameters...
+        
+        # Create geometry collection
+        collection = GeometryCollection()
+        
+        # Generate points
+        points = []
+        for i in range(n):
+            angle = i * (2 * math.pi / n)
+            dist = (random.uniform(1, 7) + offset) * 50  # Convert to radius scale
+            x = math.cos(angle) * dist
+            y = math.sin(angle) * dist
+            points.append(Point(x, y))
+        
+        # Create closed path
+        path = Path(points, closed=True)
+        collection.add(path)
+        
+        # Return the collection
+        return collection
+    
+    def is_3d(self):
+        return False
+```
+
+## Algorithm Categories
+
+### 2D Algorithms
+- Lissajous Spirals
+- Polar Spirograph
+- Recursive Tiling
+- Interpolated Circles
+- Cycloid Generators
+
+### 3D Algorithms
+- Torus Generator
+- 3D Tree Structures
+- Parametric Surfaces
+- Wireframe Solids
+
+### Transformations
+- Repetition
+- Distortion
+- Projection
+
+## Implementation Strategy
+
+1. **Start with Base Classes**:
+   - Implement the core interfaces first
+   - Build the parameter system
+   - Create the geometry primitives
+
+2. **Create Algorithm Registry**:
+   - Implement plugin discovery and loading
+   - Create category organization
+
+3. **Port Existing Algorithms**:
+   - Start with simpler 2D algorithms
+   - Move to more complex 3D ones
+   - Ensure consistent interface
+
+4. **Testing Strategy**:
+   - Unit tests for parameter validation
+   - Visual tests for geometry output
+   - Performance benchmarks for complex algorithms
+
+## Future Extensions
+
+1. **Algorithm Composition**:
+   - Allow algorithms to be chained
+   - Enable one algorithm to use another's output
+
+2. **Parameter Dependencies**:
+   - Add support for parameters that show/hide based on other parameters
+   - Implement dynamic parameter ranges
+
+3. **Custom UI Extensions**:
+   - Support for algorithm-specific interactive controls
+   - Preview within parameter adjustment
+
+4. **Optimization**:
+   - Add caching for generated geometry
+   - Implement level-of-detail for complex structures

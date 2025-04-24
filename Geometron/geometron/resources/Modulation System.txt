@@ -1,0 +1,619 @@
+# GEOMETRON MODULATION SYSTEM
+
+## Overview
+
+The Modulation System extends Geometron's capabilities by allowing transformations to be applied to generated patterns independent of the algorithms that create them. This creates a separation of concerns where algorithms focus on generating base patterns, while modulations handle transformations, repetitions, and effects. The system also introduces global parameters to enable parametric relationships between different components.
+
+## Key Concepts
+
+### 1. Modulation Layers
+
+Modulation layers apply transformations to geometry from other layers. They operate in two modes:
+
+1. **Targeted Mode**: Applied to a specific layer only
+2. **Cascading Mode**: Applied to all visible layers below it in the stack
+
+Like regular algorithm layers, modulation layers can be reordered, shown/hidden, and have their own parameters.
+
+### 2. Global Parameters
+
+Global parameters are named values that can be referenced across the project. When a global parameter changes, all elements using that parameter update automatically. This creates dynamic, parametric relationships between different parts of the composition.
+
+### 3. Types of Modulations
+
+Modulations fall into several categories:
+
+1. **Repetition Modulations**: Duplicate patterns with transformations
+   - Rotational repetition (around point)
+   - Array repetition (grid)
+   - Mirror repetition (reflection)
+
+2. **Deformation Modulations**: Apply mathematical transformations to points
+   - Wave deformation
+   - Twist/spiral
+   - Noise displacement
+
+3. **Subdivision Modulations**: Add detail to existing geometry
+   - Line subdivision
+   - Fractal recursion
+   - Interpolation
+
+4. **Filter Modulations**: Selectively show/hide parts of patterns
+   - Clipping masks
+   - Density filters
+   - Random point removal
+
+## Core Components
+
+### 1. Modulation Layer Class
+
+```python
+class ModulationLayer(Layer):
+    """A layer that applies transformations to other layers' geometry."""
+    
+    def __init__(self, modulation=None, parameters=None, name=None, target_layer_id=None):
+        super().__init__(algorithm=modulation, parameters=parameters, name=name)
+        self.is_modulation = True
+        self.target_layer_id = target_layer_id  # If None, affects all layers below
+        
+    def apply_modulation(self, geometry, layer_id=None):
+        """Apply this modulation to a GeometryCollection."""
+        if self.algorithm is None or not self.visible:
+            return geometry  # No change if modulation is missing or hidden
+            
+        # Skip if this is targeted and doesn't target the given layer
+        if self.target_layer_id is not None and layer_id != self.target_layer_id:
+            return geometry
+            
+        # Apply the modulation transformation
+        return self.algorithm.apply_modulation(geometry, self.parameters)
+    
+    def as_dict(self):
+        """Convert to dictionary for serialization."""
+        data = super().as_dict()
+        data["is_modulation"] = True
+        data["target_layer_id"] = self.target_layer_id
+        return data
+    
+    @classmethod
+    def from_dict(cls, data, algorithm_registry):
+        """Create a modulation layer from serialized data."""
+        layer = super().from_dict(data, algorithm_registry)
+        layer.is_modulation = True
+        layer.target_layer_id = data.get("target_layer_id")
+        return layer
+```
+
+### 2. Modulation Interface
+
+```python
+class GeometronModulation(GeometronAlgorithm):
+    """Base class for all modulation transformations."""
+    
+    def apply_modulation(self, geometry: GeometryCollection, parameters: Dict) -> GeometryCollection:
+        """Apply this modulation to a geometry collection."""
+        pass
+    
+    def is_modulation(self) -> bool:
+        """Return True to identify this as a modulation algorithm."""
+        return True
+        
+    def get_preview_image(self, width: int, height: int, parameters: Dict) -> QImage:
+        """Generate a preview thumbnail of the modulation effect."""
+        # Create simple geometry to demonstrate the effect
+        demo_geometry = self._create_demo_geometry()
+        
+        # Apply the modulation
+        result = self.apply_modulation(demo_geometry, parameters)
+        
+        # Render to image
+        return self._render_preview(result, width, height)
+        
+    def _create_demo_geometry(self) -> GeometryCollection:
+        """Create demonstration geometry to show the modulation effect."""
+        # By default, create a simple grid pattern
+        collection = GeometryCollection()
+        # ... create basic grid pattern ...
+        return collection
+```
+
+### 3. Example Modulation Implementation
+
+```python
+class RotationalRepetitionModulation(GeometronModulation):
+    """Creates rotational repetitions of geometry around a point."""
+    
+    def get_name(self) -> str:
+        return "Rotational Repetition"
+    
+    def get_category(self) -> str:
+        return "Repetition"
+        
+    def get_description(self) -> str:
+        return "Creates multiple copies of the geometry rotated around a center point."
+    
+    def get_parameters(self) -> List[ParameterDefinition]:
+        return [
+            ParameterDefinition(
+                name="copies",
+                display_name="Number of Copies",
+                parameter_type=ParameterType.INTEGER,
+                default_value=6,
+                min_value=1,
+                max_value=100,
+                description="Number of rotated copies to create (including original)"
+            ),
+            ParameterDefinition(
+                name="center_x",
+                display_name="Center X",
+                parameter_type=ParameterType.FLOAT,
+                default_value=0.0,
+                description="X coordinate of rotation center"
+            ),
+            ParameterDefinition(
+                name="center_y",
+                display_name="Center Y",
+                parameter_type=ParameterType.FLOAT,
+                default_value=0.0,
+                description="Y coordinate of rotation center"
+            ),
+            ParameterDefinition(
+                name="angle_offset",
+                display_name="Angle Offset",
+                parameter_type=ParameterType.ANGLE,
+                default_value=0.0,
+                description="Starting angle offset in degrees"
+            )
+        ]
+    
+    def apply_modulation(self, geometry: GeometryCollection, parameters: Dict) -> GeometryCollection:
+        copies = parameters.get("copies", 6)
+        center_x = parameters.get("center_x", 0.0)
+        center_y = parameters.get("center_y", 0.0)
+        angle_offset = parameters.get("angle_offset", 0.0)
+        
+        # Create result collection
+        result = GeometryCollection()
+        
+        # Calculate angle step
+        angle_step = 360.0 / copies
+        
+        # Create copies
+        for i in range(copies):
+            # Apply rotation transformation
+            angle = angle_offset + (i * angle_step)
+            
+            # Create transformation matrix
+            matrix = Matrix.identity()
+            matrix.translate(-center_x, -center_y)  # Move to origin
+            matrix.rotate(math.radians(angle))      # Rotate
+            matrix.translate(center_x, center_y)    # Move back
+            
+            # Create transformed copy
+            copy = geometry.copy()
+            copy.transform(matrix)
+            
+            # Add all objects from copy to result
+            for obj in copy.objects:
+                result.add(obj)
+        
+        return result
+```
+
+### 4. Enhanced LayerManager
+
+```python
+class LayerManager:
+    """Enhanced LayerManager supporting modulation layers."""
+    
+    # ... existing methods ...
+    
+    def apply_modulations(self, layer_index):
+        """Apply all relevant modulations to a layer's geometry."""
+        if not (0 <= layer_index < len(self.layers)):
+            return None
+            
+        layer = self.layers[layer_index]
+        if not layer.visible or layer.is_modulation:
+            return None
+            
+        # Get base geometry from the layer
+        geometry = layer.get_geometry()
+        if geometry is None:
+            return None
+            
+        # Apply targeted modulations specifically for this layer
+        for mod_layer in self.get_modulation_layers():
+            if mod_layer.target_layer_id == layer.id:
+                geometry = mod_layer.apply_modulation(geometry, layer.id)
+                
+        # Apply cascading modulations from layers above this one
+        for i in range(layer_index - 1, -1, -1):
+            above_layer = self.layers[i]
+            if above_layer.is_modulation and above_layer.visible and above_layer.target_layer_id is None:
+                geometry = above_layer.apply_modulation(geometry, layer.id)
+                
+        return geometry
+        
+    def get_modulation_layers(self):
+        """Get all modulation layers in the document."""
+        return [layer for layer in self.layers if hasattr(layer, 'is_modulation') and layer.is_modulation]
+        
+    def create_modulation_layer(self, modulation, parameters=None, name=None, target_layer_id=None):
+        """Create and add a new modulation layer."""
+        layer = ModulationLayer(modulation, parameters, name, target_layer_id)
+        return self.add_layer(layer)
+```
+
+## Global Parameter System
+
+### 1. Parameter Value Class
+
+```python
+class ParameterValue:
+    """Represents a parameter value that can be a literal or a reference to a global parameter."""
+    
+    def __init__(self, value):
+        self.raw_value = value
+        self.is_reference = isinstance(value, str) and value.startswith('$')
+        self.reference_name = value[1:] if self.is_reference else None
+        
+    def get_value(self, global_parameters=None):
+        """Get the actual value, resolving references if needed."""
+        if not self.is_reference or global_parameters is None:
+            return self.raw_value
+            
+        if self.reference_name in global_parameters:
+            return global_parameters[self.reference_name]
+            
+        # Reference not found, return raw value
+        return self.raw_value
+        
+    def __repr__(self):
+        return f"ParameterValue({self.raw_value})"
+```
+
+### 2. Global Parameter Manager
+
+```python
+class GlobalParameterManager:
+    """Manages global parameters for the project."""
+    
+    def __init__(self):
+        self.parameters = {}
+        self.observers = []
+        
+    def set_parameter(self, name, value):
+        """Set a global parameter value."""
+        old_value = self.parameters.get(name)
+        self.parameters[name] = value
+        
+        if old_value != value:
+            self._notify_change(name, value)
+            
+    def get_parameter(self, name, default=None):
+        """Get a global parameter value."""
+        return self.parameters.get(name, default)
+        
+    def remove_parameter(self, name):
+        """Remove a global parameter."""
+        if name in self.parameters:
+            del self.parameters[name]
+            self._notify_change(name, None)
+            
+    def get_all_parameters(self):
+        """Get all parameters as a dictionary."""
+        return self.parameters.copy()
+        
+    def add_observer(self, observer):
+        """Add an observer for parameter changes."""
+        if observer not in self.observers:
+            self.observers.append(observer)
+            
+    def remove_observer(self, observer):
+        """Remove an observer."""
+        if observer in self.observers:
+            self.observers.remove(observer)
+            
+    def _notify_change(self, name, value):
+        """Notify observers of a parameter change."""
+        for observer in self.observers:
+            if hasattr(observer, 'on_global_parameter_change'):
+                observer.on_global_parameter_change(name, value)
+                
+    def as_dict(self):
+        """Convert to dictionary for serialization."""
+        return self.parameters.copy()
+        
+    @classmethod
+    def from_dict(cls, data):
+        """Create from serialized data."""
+        manager = cls()
+        manager.parameters = data.copy()
+        return manager
+```
+
+### 3. Integration with Layer and Modulation System
+
+```python
+class Document:
+    """Top-level document class containing layers and global parameters."""
+    
+    def __init__(self):
+        self.layer_manager = LayerManager()
+        self.global_parameters = GlobalParameterManager()
+        
+        # Connect parameter changes to layer updates
+        self.global_parameters.add_observer(self)
+        
+    def on_global_parameter_change(self, name, value):
+        """Handle global parameter changes."""
+        # Mark all layers that use this parameter for update
+        for layer in self.layer_manager.layers:
+            if self._layer_uses_parameter(layer, name):
+                layer.needs_update = True
+                
+        # Trigger a redraw
+        self.request_redraw()
+        
+    def _layer_uses_parameter(self, layer, param_name):
+        """Check if a layer uses a specific global parameter."""
+        # Check each parameter value to see if it references the global parameter
+        for key, value in layer.parameters.items():
+            if isinstance(value, str) and value == f"${param_name}":
+                return True
+        return False
+        
+    def resolve_parameter_value(self, value):
+        """Resolve a parameter value, handling global parameter references."""
+        pv = ParameterValue(value)
+        return pv.get_value(self.global_parameters.get_all_parameters())
+        
+    def get_layer_geometry(self, layer_index):
+        """Get fully processed geometry for a layer including modulations."""
+        # Get base geometry
+        geometry = self.layer_manager.layers[layer_index].get_geometry()
+        
+        # Apply modulations
+        return self.layer_manager.apply_modulations(layer_index)
+```
+
+## Modulation Types to Implement
+
+### 1. Repetition Modulations
+
+- **Rotational Repetition**: Create copies around a center point
+- **Array/Grid Repetition**: Arrange copies in rows and columns
+- **Mirror Repetition**: Create mirrored reflections
+- **Radial Array**: Combine rotation and scaling for spiral-like effects
+
+### 2. Deformation Modulations
+
+- **Wave Deformation**: Apply sine/cosine waves to points
+- **Twist/Spiral**: Rotate points based on distance from center
+- **Noise Displacement**: Move points based on noise functions
+- **Bend**: Curve straight lines along an arc
+
+### 3. Subdivision Modulations
+
+- **Line Subdivision**: Insert points along lines
+- **Fractal Recursion**: Apply recursive subdivisions
+- **Interpolation**: Create intermediate shapes between forms
+
+### 4. Filter Modulations
+
+- **Clipping Mask**: Show only parts within defined boundaries
+- **Random Filter**: Randomly remove geometry
+- **Density Filter**: Remove geometry based on concentration
+
+## UI Components
+
+### 1. Global Parameter Panel
+
+```python
+class GlobalParameterPanel(QWidget):
+    """UI Panel for managing global parameters."""
+    
+    def __init__(self, global_parameter_manager, parent=None):
+        super().__init__(parent)
+        self.parameter_manager = global_parameter_manager
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Set up the panel UI."""
+        layout = QVBoxLayout(self)
+        
+        # Header
+        header = QLabel("Global Parameters")
+        header.setStyleSheet("font-weight: bold;")
+        layout.addWidget(header)
+        
+        # Parameter list
+        self.param_table = QTableWidget()
+        self.param_table.setColumnCount(2)
+        self.param_table.setHorizontalHeaderLabels(["Name", "Value"])
+        self.param_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.param_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        layout.addWidget(self.param_table)
+        
+        # Add/Remove buttons
+        btn_layout = QHBoxLayout()
+        
+        self.add_btn = QPushButton("Add")
+        self.add_btn.clicked.connect(self.on_add_parameter)
+        btn_layout.addWidget(self.add_btn)
+        
+        self.remove_btn = QPushButton("Remove")
+        self.remove_btn.clicked.connect(self.on_remove_parameter)
+        btn_layout.addWidget(self.remove_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        # Refresh the parameter list
+        self.refresh_parameters()
+        
+    def refresh_parameters(self):
+        """Update the parameter list UI."""
+        self.param_table.setRowCount(0)
+        
+        for i, (name, value) in enumerate(self.parameter_manager.get_all_parameters().items()):
+            self.param_table.insertRow(i)
+            
+            # Parameter name
+            name_item = QTableWidgetItem(name)
+            self.param_table.setItem(i, 0, name_item)
+            
+            # Parameter value
+            value_item = QTableWidgetItem(str(value))
+            self.param_table.setItem(i, 1, value_item)
+            
+            # Connect editing
+            self.param_table.cellChanged.connect(self.on_cell_changed)
+            
+    def on_add_parameter(self):
+        """Handle add parameter button click."""
+        # Find a unique name
+        base_name = "param"
+        name = base_name
+        i = 1
+        while name in self.parameter_manager.get_all_parameters():
+            name = f"{base_name}{i}"
+            i += 1
+            
+        # Add the parameter
+        self.parameter_manager.set_parameter(name, 0)
+        self.refresh_parameters()
+        
+    def on_remove_parameter(self):
+        """Handle remove parameter button click."""
+        selected_rows = self.param_table.selectedIndexes()
+        if not selected_rows:
+            return
+            
+        row = selected_rows[0].row()
+        name = self.param_table.item(row, 0).text()
+        
+        # Remove the parameter
+        self.parameter_manager.remove_parameter(name)
+        self.refresh_parameters()
+        
+    def on_cell_changed(self, row, column):
+        """Handle parameter table cell edit."""
+        try:
+            name = self.param_table.item(row, 0).text()
+            value_text = self.param_table.item(row, 1).text()
+            
+            # Try to convert to appropriate type
+            try:
+                value = float(value_text)
+                # Convert to int if it's a whole number
+                if value == int(value):
+                    value = int(value)
+            except ValueError:
+                value = value_text
+                
+            # Update the parameter
+            old_name = list(self.parameter_manager.get_all_parameters().keys())[row]
+            
+            # Name changed
+            if column == 0 and name != old_name:
+                old_value = self.parameter_manager.get_parameter(old_name)
+                self.parameter_manager.remove_parameter(old_name)
+                self.parameter_manager.set_parameter(name, old_value)
+                
+            # Value changed
+            elif column == 1:
+                self.parameter_manager.set_parameter(name, value)
+                
+        except Exception as e:
+            print(f"Error updating parameter: {e}")
+            self.refresh_parameters()  # Reset UI on error
+```
+
+### 2. Layer Panel with Modulation Support
+
+```python
+class EnhancedLayerPanel(LayerPanel):
+    """Extended layer panel with modulation support."""
+    
+    # ... existing methods ...
+    
+    def on_add_layer(self):
+        """Handle add layer button click with support for modulations."""
+        # Show dialog with tabs for algorithms and modulations
+        dialog = LayerTypeDialog(self.layer_manager.algorithm_registry, self)
+        if dialog.exec_() == QDialog.Accepted:
+            if dialog.selected_type == "algorithm":
+                # Add regular algorithm layer
+                self.layer_manager.add_layer(algorithm=dialog.selected_item)
+            elif dialog.selected_type == "modulation":
+                # Add modulation layer
+                target_mode = dialog.get_target_mode()
+                if target_mode == "cascading":
+                    # Apply to all layers below
+                    self.layer_manager.create_modulation_layer(
+                        modulation=dialog.selected_item,
+                        target_layer_id=None
+                    )
+                else:
+                    # Apply to specific layer
+                    target_layer = self.layer_manager.get_active_layer()
+                    if target_layer:
+                        self.layer_manager.create_modulation_layer(
+                            modulation=dialog.selected_item,
+                            target_layer_id=target_layer.id
+                        )
+    
+    def refresh_layer_list(self):
+        """Update the layer list UI with modulation indicators."""
+        self.layer_list.clear()
+        
+        for i, layer in enumerate(reversed(self.layer_manager.layers)):
+            item = QListWidgetItem(layer.name)
+            item.setData(Qt.UserRole, len(self.layer_manager.layers) - 1 - i)
+            
+            # Update icon based on layer type and visibility
+            if hasattr(layer, 'is_modulation') and layer.is_modulation:
+                if layer.target_layer_id:
+                    item.setIcon(QIcon(":/icons/modulation_targeted.png"))
+                else:
+                    item.setIcon(QIcon(":/icons/modulation_cascading.png"))
+            elif not layer.visible:
+                item.setIcon(QIcon(":/icons/hidden.png"))
+            
+            # Update font for locked layers
+            if layer.locked:
+                font = item.font()
+                font.setItalic(True)
+                item.setFont(font)
+                
+            self.layer_list.addItem(item)
+            
+        # Set the active layer
+        active_reversed = len(self.layer_manager.layers) - 1 - self.layer_manager.active_layer_index
+        if 0 <= active_reversed < self.layer_list.count():
+            self.layer_list.setCurrentRow(active_reversed)
+```
+
+## Implementation Strategy
+
+1. **Enhance Layer System**:
+   - Add ModulationLayer class extending Layer
+   - Update LayerManager to handle modulations
+
+2. **Create Modulation Framework**:
+   - Define GeometronModulation interface
+   - Implement core modulation types
+
+3. **Implement Global Parameters**:
+   - Create GlobalParameterManager
+   - Add ParameterValue handling
+
+4. **Update UI**:
+   - Create GlobalParameterPanel
+   - Enhance LayerPanel for modulations
+   - Add parameter reference input support
+
+5. **Rendering Pipeline**:
+   - Update renderer to apply modulations in correct order
+   - Handle parameter resolution during rendering

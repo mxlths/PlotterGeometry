@@ -1,0 +1,299 @@
+# GEOMETRON FILE FORMAT SPECIFICATION
+
+## Overview
+
+Geometron uses two primary file formats:
+
+1. **Project Files (.geometron)**: JSON-based format that stores all information needed to recreate a project, including layers, algorithms, parameters, and application settings.
+
+2. **Export Files (.svg)**: Industry-standard SVG format for the final output, optimized for pen plotters.
+
+This document specifies the structure and usage of these file formats.
+
+## Project File Format (.geometron)
+
+The .geometron file format is a JSON-based format designed to store all information needed to recreate a Geometron project. This includes layers, algorithms, parameters, global parameters, and application settings.
+
+### File Structure
+
+```json
+{
+  "version": "1.0",
+  "metadata": {
+    "created": "2023-07-23T14:30:45Z",
+    "modified": "2023-07-24T09:15:22Z",
+    "author": "User Name",
+    "description": "Project description"
+  },
+  "canvas": {
+    "width": 800,
+    "height": 600,
+    "units": "px",
+    "background_color": [255, 255, 255],
+    "guides": [
+      {"position": 100, "orientation": "horizontal"},
+      {"position": 200, "orientation": "vertical"}
+    ]
+  },
+  "global_parameters": {
+    "radius": 150,
+    "iterations": 8,
+    "color_scheme": "monochrome",
+    "line_thickness": 0.5
+  },
+  "layers": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Torus Layer",
+      "algorithm": "Torus Generator",
+      "is_modulation": false,
+      "parameters": {
+        "torusRadius": 150,
+        "tubeRadius": 50,
+        "resolution": 72,
+        "tubeResolution": 36,
+        "showLongitudinal": true,
+        "showLatitudinal": true,
+        "showSpiral": false,
+        "showCounterSpiral": false
+      },
+      "visible": true,
+      "locked": false,
+      "position": [0, 0],
+      "scale": [1, 1],
+      "rotation": 0,
+      "line_color": [0, 0, 0],
+      "line_weight": 1.0
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Interpolated Circle",
+      "algorithm": "Interpolated Circle",
+      "is_modulation": false,
+      "parameters": {
+        "n": 7,
+        "offset": 2.0,
+        "numShrinkingDuplicates": 5,
+        "numGrowingDuplicates": 5,
+        "initialScaleOffset": 1.1,
+        "scaleDecay": 0.9,
+        "fluctuationAmount": 0.1
+      },
+      "visible": true,
+      "locked": false,
+      "position": [50, 100],
+      "scale": [0.8, 0.8],
+      "rotation": 45,
+      "line_color": [255, 0, 0],
+      "line_weight": 0.5
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440002",
+      "name": "Rotation Modulation",
+      "algorithm": "Rotational Repetition",
+      "is_modulation": true,
+      "target_layer_id": "550e8400-e29b-41d4-a716-446655440001",
+      "parameters": {
+        "copies": 6,
+        "center_x": 0,
+        "center_y": 0,
+        "angle_offset": 0
+      },
+      "visible": true,
+      "locked": false,
+      "position": [0, 0],
+      "scale": [1, 1],
+      "rotation": 0,
+      "line_color": [0, 0, 0],
+      "line_weight": 1.0
+    }
+  ],
+  "active_layer_index": 1,
+  "export_settings": {
+    "default_format": "svg",
+    "svg": {
+      "width_mm": 210,
+      "height_mm": 297,
+      "stroke_precision": 2,
+      "optimize_paths": true,
+      "merge_layers": false
+    }
+  },
+  "ui_state": {
+    "camera": {
+      "zoom": 1.0,
+      "pan_x": 0,
+      "pan_y": 0
+    },
+    "panels": {
+      "layer_panel_width": 250,
+      "properties_panel_height": 300
+    }
+  }
+}
+```
+
+### Key Sections
+
+#### Version
+
+The `version` field specifies the file format version, allowing for backward compatibility as the format evolves.
+
+#### Metadata
+
+The `metadata` section contains information about the project creation, modification, and authorship.
+
+#### Canvas
+
+The `canvas` section defines the drawing area properties:
+- Dimensions (width and height)
+- Units (px, mm, inches)
+- Background color
+- Guide lines
+
+#### Global Parameters
+
+The `global_parameters` section stores all named global parameters that can be referenced by different layers using the `$name` syntax.
+
+#### Layers
+
+The `layers` array contains all layers in the project, ordered from bottom to top. Each layer includes:
+- Unique identifier
+- Name
+- Algorithm type
+- Parameters specific to the algorithm
+- Visibility and lock state
+- Transformation properties (position, scale, rotation)
+- Styling properties (line color, weight)
+- For modulation layers, additional properties like `is_modulation` and optional `target_layer_id`
+
+#### Export Settings
+
+The `export_settings` section defines default settings for exporting to different formats, focusing on SVG for pen plotters.
+
+#### UI State
+
+The `ui_state` section stores the state of the user interface, including camera position, panel sizes, and other view-specific information.
+
+### Parameter References
+
+Global parameters can be referenced in layer parameters using the `$name` syntax:
+
+```json
+{
+  "global_parameters": {
+    "num_points": 7,
+    "base_radius": 150
+  },
+  "layers": [
+    {
+      "parameters": {
+        "n": "$num_points",
+        "radius": "$base_radius"
+      }
+    }
+  ]
+}
+```
+
+When the file is loaded, these references are resolved to their actual values and updated in real-time when global parameters change.
+
+## Export File Format (SVG)
+
+Geometron exports compositions as SVG (Scalable Vector Graphics) files, optimized for pen plotters.
+
+### SVG Structure
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="210mm" height="297mm" viewBox="0 0 210 297" xmlns="http://www.w3.org/2000/svg">
+  <!-- Metadata -->
+  <metadata>
+    <geometron:metadata xmlns:geometron="http://geometron.app/metadata/1.0/">
+      <geometron:software>Geometron 1.0</geometron:software>
+      <geometron:created>2023-07-24T15:30:45Z</geometron:created>
+    </geometron:metadata>
+  </metadata>
+  
+  <!-- Layers as groups -->
+  <g id="layer_550e8400-e29b-41d4-a716-446655440000" inkscape:label="Torus Layer">
+    <!-- Lines from the torus -->
+    <path d="M 10,10 C 20,20 30,10 40,10" style="fill:none;stroke:#000000;stroke-width:0.5;"/>
+    <!-- More paths... -->
+  </g>
+  
+  <g id="layer_550e8400-e29b-41d4-a716-446655440001" inkscape:label="Interpolated Circle">
+    <!-- Paths from the interpolated circle -->
+    <path d="M 100,100 C 110,90 120,90 130,100" style="fill:none;stroke:#ff0000;stroke-width:0.25;"/>
+    <!-- More paths... -->
+  </g>
+</svg>
+```
+
+### SVG Export Options
+
+The SVG export process supports several optimization options:
+
+1. **Path Optimization**: Reduce the number of points in paths while maintaining visual quality
+2. **Layer Control**: Export all layers or selected layers only
+3. **Dimension Settings**: Configure physical dimensions (mm/inches) for plotter output
+4. **Metadata Inclusion**: Optionally include Geometron-specific metadata
+5. **Precision Control**: Set decimal precision for coordinates
+
+## File Operations
+
+### Saving Projects
+
+Projects can be saved at any time, storing the complete state of the application. This includes:
+- All layers and their parameters
+- Global parameters
+- Canvas settings
+- UI state
+
+The file is saved with the `.geometron` extension.
+
+### Autosave
+
+The application implements an autosave feature that creates temporary backups at regular intervals to prevent data loss.
+
+### Exporting SVG
+
+When exporting to SVG, the application:
+1. Renders all visible layers in order
+2. Applies appropriate transformations and styling
+3. Optimizes paths according to export settings
+4. Generates the SVG file with correct dimensions
+
+### Project Templates
+
+Frequently used project configurations can be saved as templates, which include:
+- Canvas settings
+- Global parameters
+- Common layers
+- Export presets
+
+Templates are stored as `.geometron-template` files with the same JSON structure as regular project files.
+
+## Implementation Notes
+
+### File Saving Process
+
+1. **Serialization**: Convert all application objects to JSON-compatible data structures using their `as_dict()` methods
+2. **Global Parameter Resolution**: Maintain references to global parameters rather than resolving them
+3. **Validation**: Validate the data structure before writing to disk
+4. **Compression**: Optionally compress larger projects to reduce file size
+5. **Error Handling**: Implement robust error handling for file operations
+
+### File Loading Process
+
+1. **Validation**: Validate the file structure and version compatibility
+2. **Deserialization**: Convert JSON data back to application objects
+3. **Global Parameter Resolution**: Establish connections between global parameters and referencing layers
+4. **Error Recovery**: Implement graceful handling of missing algorithms or corrupted data
+
+### Compatibility Strategy
+
+To maintain compatibility with future versions:
+1. **Version Checking**: Check file version before loading
+2. **Feature Detection**: Handle missing or additional properties gracefully
+3. **Migration Tools**: Provide utilities to update files from older versions

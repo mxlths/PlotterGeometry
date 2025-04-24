@@ -1,0 +1,744 @@
+# GEOMETRON LAYER SYSTEM
+
+## Overview
+
+The Layer System is a core component of Geometron that enables users to combine multiple algorithm outputs into a single composition. Each layer represents an instance of an algorithm with its own parameters, transformations, and styling. This document outlines the architecture and functionality of the layer system.
+
+## Key Concepts
+
+### 1. Layer Structure
+
+Each layer contains:
+- A reference to an algorithm instance
+- The algorithm's parameters
+- Transformation properties (position, scale, rotation)
+- Styling properties (color, line weight)
+- Visibility and lock state
+- Optional name and metadata
+
+### 2. Layer Hierarchy
+
+- Layers are ordered from bottom to top in the composition
+- Higher layers are rendered on top of lower layers
+- Layer visibility can be toggled individually
+- Layers can be grouped (future feature)
+
+### 3. Layer Operations
+
+- Add new layer
+- Delete layer
+- Duplicate layer
+- Reorder layers (move up/down)
+- Toggle visibility
+- Lock/unlock for editing
+- Solo mode (show only the selected layer)
+
+## Core Components
+
+### 1. Layer Class
+
+```python
+class Layer:
+    """Represents a single layer in the composition."""
+    
+    def __init__(self, algorithm=None, parameters=None, name=None):
+        self.id = uuid.uuid4()  # Unique identifier
+        self.name = name or "Untitled Layer"
+        self.algorithm = algorithm
+        self.parameters = parameters or {}
+        self.visible = True
+        self.locked = False
+        
+        # Transformation properties
+        self.position = Vector2D(0, 0)
+        self.scale = Vector2D(1, 1)
+        self.rotation = 0.0  # In degrees
+        
+        # Styling properties
+        self.line_color = (0, 0, 0)  # RGB
+        self.line_weight = 1.0
+        
+        # Cached geometry
+        self.geometry_cache = None
+        self.needs_update = True
+        
+    def update_geometry(self):
+        """Regenerate geometry if needed."""
+        if self.needs_update and self.algorithm:
+            self.geometry_cache = self.algorithm.generate_geometry(self.parameters)
+            self.needs_update = False
+            
+    def get_geometry(self):
+        """Get the transformed geometry of this layer."""
+        self.update_geometry()
+        if self.geometry_cache:
+            # Create a copy of the geometry
+            transformed = self.geometry_cache.copy()
+            
+            # Apply transformations
+            transform_matrix = Matrix.identity()
+            transform_matrix.translate(self.position.x, self.position.y)
+            transform_matrix.rotate(math.radians(self.rotation))
+            transform_matrix.scale(self.scale.x, self.scale.y)
+            
+            transformed.transform(transform_matrix)
+            return transformed
+            
+        return None
+    
+    def set_parameter(self, name, value):
+        """Set a parameter value and mark for update."""
+        if name in self.parameters and self.parameters[name] != value:
+            self.parameters[name] = value
+            self.needs_update = True
+    
+    def as_dict(self):
+        """Convert layer to dictionary for serialization."""
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "algorithm": self.algorithm.get_name() if self.algorithm else None,
+            "parameters": self.parameters,
+            "visible": self.visible,
+            "locked": self.locked,
+            "position": [self.position.x, self.position.y],
+            "scale": [self.scale.x, self.scale.y],
+            "rotation": self.rotation,
+            "line_color": self.line_color,
+            "line_weight": self.line_weight
+        }
+    
+    @classmethod
+    def from_dict(cls, data, algorithm_registry):
+        """Create a layer from serialized data."""
+        layer = cls()
+        layer.id = uuid.UUID(data.get("id"))
+        layer.name = data.get("name", "Untitled Layer")
+        
+        # Get algorithm from registry
+        algo_name = data.get("algorithm")
+        if algo_name and algorithm_registry:
+            layer.algorithm = algorithm_registry.get_algorithm_instance(algo_name)
+            
+        layer.parameters = data.get("parameters", {})
+        layer.visible = data.get("visible", True)
+        layer.locked = data.get("locked", False)
+        
+        # Set transformation properties
+        pos = data.get("position", [0, 0])
+        layer.position = Vector2D(pos[0], pos[1])
+        
+        scale = data.get("scale", [1, 1])
+        layer.scale = Vector2D(scale[0], scale[1])
+        
+        layer.rotation = data.get("rotation", 0.0)
+        
+        # Set styling properties
+        layer.line_color = data.get("line_color", (0, 0, 0))
+        layer.line_weight = data.get("line_weight", 1.0)
+        
+        layer.needs_update = True
+        return layer
+```
+
+### 2. Layer Manager
+
+```python
+class LayerManager:
+    """Manages a collection of layers in a document."""
+    
+    def __init__(self, algorithm_registry=None):
+        self.layers = []  # Ordered list of layers
+        self.active_layer_index = -1
+        self.algorithm_registry = algorithm_registry
+        self.observers = []  # For change notifications
+        
+    def add_layer(self, layer=None, algorithm=None, parameters=None):
+        """Add a new layer to the document."""
+        if layer is None:
+            layer = Layer(algorithm, parameters)
+        
+        self.layers.append(layer)
+        self.active_layer_index = len(self.layers) - 1
+        self._notify_change("layer_added", layer)
+        return layer
+        
+    def remove_layer(self, index):
+        """Remove a layer at the specified index."""
+        if 0 <= index < len(self.layers):
+            layer = self.layers.pop(index)
+            
+            # Update active layer index
+            if self.active_layer_index >= len(self.layers):
+                self.active_layer_index = max(0, len(self.layers) - 1)
+            elif self.active_layer_index >= index:
+                self.active_layer_index = max(0, self.active_layer_index - 1)
+                
+            self._notify_change("layer_removed", layer)
+            return layer
+        return None
+    
+    def duplicate_layer(self, index):
+        """Duplicate a layer at the specified index."""
+        if 0 <= index < len(self.layers):
+            # Create a new layer with the same properties
+            source_layer = self.layers[index]
+            layer_data = source_layer.as_dict()
+            layer_data["id"] = str(uuid.uuid4())  # New ID
+            layer_data["name"] = f"{source_layer.name} Copy"
+            
+            new_layer = Layer.from_dict(layer_data, self.algorithm_registry)
+            
+            # Insert after the source layer
+            self.layers.insert(index + 1, new_layer)
+            self.active_layer_index = index + 1
+            
+            self._notify_change("layer_added", new_layer)
+            return new_layer
+        return None
+    
+    def move_layer(self, from_index, to_index):
+        """Move a layer from one position to another."""
+        if 0 <= from_index < len(self.layers) and 0 <= to_index < len(self.layers):
+            layer = self.layers.pop(from_index)
+            self.layers.insert(to_index, layer)
+            
+            # Update active layer index
+            if self.active_layer_index == from_index:
+                self.active_layer_index = to_index
+                
+            self._notify_change("layer_moved", layer)
+            return True
+        return False
+    
+    def get_active_layer(self):
+        """Get the currently active layer."""
+        if 0 <= self.active_layer_index < len(self.layers):
+            return self.layers[self.active_layer_index]
+        return None
+    
+    def set_active_layer(self, index):
+        """Set the active layer by index."""
+        if 0 <= index < len(self.layers):
+            self.active_layer_index = index
+            self._notify_change("active_layer_changed", self.get_active_layer())
+            return True
+        return False
+    
+    def toggle_layer_visibility(self, index):
+        """Toggle the visibility of a layer."""
+        if 0 <= index < len(self.layers):
+            layer = self.layers[index]
+            layer.visible = not layer.visible
+            self._notify_change("layer_visibility_changed", layer)
+            return layer.visible
+        return None
+    
+    def toggle_layer_lock(self, index):
+        """Toggle the lock state of a layer."""
+        if 0 <= index < len(self.layers):
+            layer = self.layers[index]
+            layer.locked = not layer.locked
+            self._notify_change("layer_lock_changed", layer)
+            return layer.locked
+        return None
+    
+    def as_dict(self):
+        """Convert all layers to dictionary for serialization."""
+        return {
+            "layers": [layer.as_dict() for layer in self.layers],
+            "active_layer_index": self.active_layer_index
+        }
+    
+    @classmethod
+    def from_dict(cls, data, algorithm_registry):
+        """Create a layer manager from serialized data."""
+        manager = cls(algorithm_registry)
+        
+        # Create layers
+        for layer_data in data.get("layers", []):
+            layer = Layer.from_dict(layer_data, algorithm_registry)
+            manager.layers.append(layer)
+            
+        # Set active layer
+        manager.active_layer_index = data.get("active_layer_index", -1)
+        if manager.active_layer_index >= len(manager.layers):
+            manager.active_layer_index = max(0, len(manager.layers) - 1)
+            
+        return manager
+    
+    def add_observer(self, observer):
+        """Add a change observer."""
+        if observer not in self.observers:
+            self.observers.append(observer)
+            
+    def remove_observer(self, observer):
+        """Remove a change observer."""
+        if observer in self.observers:
+            self.observers.remove(observer)
+            
+    def _notify_change(self, change_type, data=None):
+        """Notify observers of a change."""
+        for observer in self.observers:
+            if hasattr(observer, "on_layer_change"):
+                observer.on_layer_change(change_type, data)
+```
+
+### 3. Layer UI Components
+
+#### Layer Panel
+
+The Layer Panel provides a visual interface for managing layers:
+
+```python
+class LayerPanel(QWidget):
+    """UI Panel for layer management."""
+    
+    def __init__(self, layer_manager, parent=None):
+        super().__init__(parent)
+        self.layer_manager = layer_manager
+        self.layer_manager.add_observer(self)
+        
+        # UI setup
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Set up the panel UI."""
+        layout = QVBoxLayout(self)
+        
+        # Layer list view
+        self.layer_list = QListWidget()
+        self.layer_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.layer_list.currentRowChanged.connect(self.on_layer_selection_changed)
+        layout.addWidget(self.layer_list)
+        
+        # Layer operation buttons
+        btn_layout = QHBoxLayout()
+        
+        self.add_btn = QPushButton("+")
+        self.add_btn.setToolTip("Add new layer")
+        self.add_btn.clicked.connect(self.on_add_layer)
+        btn_layout.addWidget(self.add_btn)
+        
+        self.duplicate_btn = QPushButton("Dup")
+        self.duplicate_btn.setToolTip("Duplicate layer")
+        self.duplicate_btn.clicked.connect(self.on_duplicate_layer)
+        btn_layout.addWidget(self.duplicate_btn)
+        
+        self.delete_btn = QPushButton("-")
+        self.delete_btn.setToolTip("Delete layer")
+        self.delete_btn.clicked.connect(self.on_delete_layer)
+        btn_layout.addWidget(self.delete_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        # Refresh the list
+        self.refresh_layer_list()
+    
+    def refresh_layer_list(self):
+        """Update the layer list UI from the layer manager."""
+        self.layer_list.clear()
+        
+        for i, layer in enumerate(reversed(self.layer_manager.layers)):
+            item = QListWidgetItem(layer.name)
+            item.setData(Qt.UserRole, len(self.layer_manager.layers) - 1 - i)
+            
+            # Update icon based on visibility
+            if not layer.visible:
+                item.setIcon(QIcon(":/icons/hidden.png"))
+            
+            # Update text based on lock state
+            if layer.locked:
+                item.setIcon(QIcon(":/icons/locked.png"))
+                
+            self.layer_list.addItem(item)
+            
+        # Set the active layer
+        active_reversed = len(self.layer_manager.layers) - 1 - self.layer_manager.active_layer_index
+        if 0 <= active_reversed < self.layer_list.count():
+            self.layer_list.setCurrentRow(active_reversed)
+    
+    def on_layer_selection_changed(self, row):
+        """Handle layer selection change."""
+        if 0 <= row < self.layer_list.count():
+            item = self.layer_list.item(row)
+            layer_index = item.data(Qt.UserRole)
+            self.layer_manager.set_active_layer(layer_index)
+    
+    def on_add_layer(self):
+        """Handle add layer button click."""
+        # This would typically show a dialog to select an algorithm
+        algorithm_dialog = AlgorithmSelectDialog(self.layer_manager.algorithm_registry, self)
+        if algorithm_dialog.exec_() == QDialog.Accepted:
+            algorithm = algorithm_dialog.selected_algorithm
+            if algorithm:
+                self.layer_manager.add_layer(algorithm=algorithm)
+    
+    def on_duplicate_layer(self):
+        """Handle duplicate layer button click."""
+        if self.layer_manager.active_layer_index >= 0:
+            self.layer_manager.duplicate_layer(self.layer_manager.active_layer_index)
+    
+    def on_delete_layer(self):
+        """Handle delete layer button click."""
+        if self.layer_manager.active_layer_index >= 0:
+            self.layer_manager.remove_layer(self.layer_manager.active_layer_index)
+    
+    def on_layer_change(self, change_type, data):
+        """Handle layer changes from the manager."""
+        self.refresh_layer_list()
+```
+
+#### Layer Properties Panel
+
+The Layer Properties Panel shows properties of the active layer:
+
+```python
+class LayerPropertiesPanel(QWidget):
+    """UI Panel for editing layer properties."""
+    
+    def __init__(self, layer_manager, parent=None):
+        super().__init__(parent)
+        self.layer_manager = layer_manager
+        self.layer_manager.add_observer(self)
+        
+        self.setup_ui()
+        self.update_ui()
+    
+    def setup_ui(self):
+        """Set up the panel UI."""
+        layout = QVBoxLayout(self)
+        
+        # Layer name edit
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("Name:"))
+        self.name_edit = QLineEdit()
+        self.name_edit.editingFinished.connect(self.on_name_changed)
+        name_layout.addWidget(self.name_edit)
+        layout.addLayout(name_layout)
+        
+        # Transform controls
+        transform_group = QGroupBox("Transform")
+        transform_layout = QFormLayout(transform_group)
+        
+        # Position
+        self.pos_x = QDoubleSpinBox()
+        self.pos_x.setRange(-10000, 10000)
+        self.pos_x.valueChanged.connect(self.on_position_changed)
+        
+        self.pos_y = QDoubleSpinBox()
+        self.pos_y.setRange(-10000, 10000)
+        self.pos_y.valueChanged.connect(self.on_position_changed)
+        
+        pos_layout = QHBoxLayout()
+        pos_layout.addWidget(self.pos_x)
+        pos_layout.addWidget(self.pos_y)
+        transform_layout.addRow("Position (X, Y):", pos_layout)
+        
+        # Scale
+        self.scale_x = QDoubleSpinBox()
+        self.scale_x.setRange(0.01, 100)
+        self.scale_x.setSingleStep(0.1)
+        self.scale_x.setValue(1.0)
+        self.scale_x.valueChanged.connect(self.on_scale_changed)
+        
+        self.scale_y = QDoubleSpinBox()
+        self.scale_y.setRange(0.01, 100)
+        self.scale_y.setSingleStep(0.1)
+        self.scale_y.setValue(1.0)
+        self.scale_y.valueChanged.connect(self.on_scale_changed)
+        
+        scale_layout = QHBoxLayout()
+        scale_layout.addWidget(self.scale_x)
+        scale_layout.addWidget(self.scale_y)
+        transform_layout.addRow("Scale (X, Y):", scale_layout)
+        
+        # Rotation
+        self.rotation = QDoubleSpinBox()
+        self.rotation.setRange(0, 360)
+        self.rotation.setSingleStep(15)
+        self.rotation.valueChanged.connect(self.on_rotation_changed)
+        transform_layout.addRow("Rotation (°):", self.rotation)
+        
+        layout.addWidget(transform_group)
+        
+        # Styling controls
+        style_group = QGroupBox("Style")
+        style_layout = QFormLayout(style_group)
+        
+        # Line color
+        self.color_btn = QPushButton()
+        self.color_btn.setFixedSize(30, 20)
+        self.color_btn.clicked.connect(self.on_color_clicked)
+        style_layout.addRow("Line Color:", self.color_btn)
+        
+        # Line weight
+        self.line_weight = QDoubleSpinBox()
+        self.line_weight.setRange(0.1, 10.0)
+        self.line_weight.setSingleStep(0.1)
+        self.line_weight.setValue(1.0)
+        self.line_weight.valueChanged.connect(self.on_line_weight_changed)
+        style_layout.addRow("Line Weight:", self.line_weight)
+        
+        layout.addWidget(style_group)
+        
+        # Algorithm parameters (placeholder)
+        self.algorithm_container = QWidget()
+        self.algorithm_layout = QVBoxLayout(self.algorithm_container)
+        layout.addWidget(self.algorithm_container)
+        
+        # Add stretch to push everything up
+        layout.addStretch()
+    
+    def update_ui(self):
+        """Update UI to reflect the active layer."""
+        layer = self.layer_manager.get_active_layer()
+        
+        # Enable/disable the panel based on layer selection
+        self.setEnabled(layer is not None)
+        
+        if layer:
+            # Update name
+            self.name_edit.setText(layer.name)
+            
+            # Update transform values
+            self.pos_x.setValue(layer.position.x)
+            self.pos_y.setValue(layer.position.y)
+            self.scale_x.setValue(layer.scale.x)
+            self.scale_y.setValue(layer.scale.y)
+            self.rotation.setValue(layer.rotation)
+            
+            # Update style values
+            color = QColor(*layer.line_color)
+            self.color_btn.setStyleSheet(f"background-color: {color.name()}")
+            self.line_weight.setValue(layer.line_weight)
+            
+            # Update algorithm parameters
+            self.update_algorithm_controls(layer)
+    
+    def update_algorithm_controls(self, layer):
+        """Update the algorithm-specific controls."""
+        # Clear existing controls
+        for i in reversed(range(self.algorithm_layout.count())):
+            widget = self.algorithm_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        
+        # If the layer has an algorithm, create its parameter UI
+        if layer and layer.algorithm:
+            self.algorithm_layout.addWidget(QLabel(f"Algorithm: {layer.algorithm.get_name()}"))
+            
+            # Create parameter UI
+            param_widget = layer.algorithm.create_parameter_ui(self.algorithm_container)
+            if param_widget:
+                self.algorithm_layout.addWidget(param_widget)
+    
+    def on_name_changed(self):
+        """Handle layer name change."""
+        layer = self.layer_manager.get_active_layer()
+        if layer:
+            layer.name = self.name_edit.text()
+            self.layer_manager._notify_change("layer_renamed", layer)
+    
+    def on_position_changed(self):
+        """Handle layer position change."""
+        layer = self.layer_manager.get_active_layer()
+        if layer:
+            layer.position.x = self.pos_x.value()
+            layer.position.y = self.pos_y.value()
+            self.layer_manager._notify_change("layer_transformed", layer)
+    
+    def on_scale_changed(self):
+        """Handle layer scale change."""
+        layer = self.layer_manager.get_active_layer()
+        if layer:
+            layer.scale.x = self.scale_x.value()
+            layer.scale.y = self.scale_y.value()
+            self.layer_manager._notify_change("layer_transformed", layer)
+    
+    def on_rotation_changed(self):
+        """Handle layer rotation change."""
+        layer = self.layer_manager.get_active_layer()
+        if layer:
+            layer.rotation = self.rotation.value()
+            self.layer_manager._notify_change("layer_transformed", layer)
+    
+    def on_color_clicked(self):
+        """Handle line color button click."""
+        layer = self.layer_manager.get_active_layer()
+        if layer:
+            initial_color = QColor(*layer.line_color)
+            color = QColorDialog.getColor(initial_color, self, "Select Line Color")
+            
+            if color.isValid():
+                layer.line_color = (color.red(), color.green(), color.blue())
+                self.color_btn.setStyleSheet(f"background-color: {color.name()}")
+                self.layer_manager._notify_change("layer_styled", layer)
+    
+    def on_line_weight_changed(self):
+        """Handle line weight change."""
+        layer = self.layer_manager.get_active_layer()
+        if layer:
+            layer.line_weight = self.line_weight.value()
+            self.layer_manager._notify_change("layer_styled", layer)
+    
+    def on_layer_change(self, change_type, data):
+        """Handle layer changes from the manager."""
+        if change_type in ["active_layer_changed", "layer_added", "layer_removed"]:
+            self.update_ui()
+```
+
+## Layer Rendering
+
+The rendering process for layers involves:
+
+1. **Layer Order**: Layers are rendered from bottom to top
+2. **Visibility Filtering**: Only visible layers are rendered
+3. **Transformation Application**: Each layer's geometry is transformed
+4. **Style Application**: Line colors/weights are applied
+
+```python
+class CompositionRenderer:
+    """Renders a composition of layers."""
+    
+    def __init__(self, layer_manager):
+        self.layer_manager = layer_manager
+        
+    def render_to_canvas(self, canvas):
+        """Render all visible layers to a canvas."""
+        # Clear the canvas
+        canvas.clear()
+        
+        # Render layers from bottom to top
+        for layer in self.layer_manager.layers:
+            if layer.visible:
+                geometry = layer.get_geometry()
+                if geometry:
+                    canvas.draw_geometry(geometry, layer.line_color, layer.line_weight)
+    
+    def export_to_svg(self, filepath, canvas_width, canvas_height):
+        """Export the composition to an SVG file."""
+        import svgwrite
+        
+        # Create SVG document
+        dwg = svgwrite.Drawing(filepath, size=(canvas_width, canvas_height))
+        
+        # Add layers
+        for layer in self.layer_manager.layers:
+            if layer.visible:
+                geometry = layer.get_geometry()
+                if geometry:
+                    # Create a group for this layer
+                    layer_group = dwg.g(id=f"layer_{layer.id}")
+                    
+                    # Add all geometry objects
+                    for obj in geometry.objects:
+                        if obj.geometry_type == GeometryType.LINE:
+                            layer_group.add(dwg.line(
+                                start=(obj.start.x, obj.start.y),
+                                end=(obj.end.x, obj.end.y),
+                                stroke=svgwrite.rgb(*layer.line_color),
+                                stroke_width=layer.line_weight
+                            ))
+                        elif obj.geometry_type == GeometryType.PATH:
+                            points = [(p.x, p.y) for p in obj.points]
+                            if len(points) > 1:
+                                if obj.closed:
+                                    points.append(points[0])  # Close the path
+                                
+                                d = "M " + " L ".join([f"{x},{y}" for x, y in points])
+                                layer_group.add(dwg.path(
+                                    d=d,
+                                    stroke=svgwrite.rgb(*layer.line_color),
+                                    stroke_width=layer.line_weight,
+                                    fill="none"
+                                ))
+                    
+                    # Add the group to the drawing
+                    dwg.add(layer_group)
+        
+        # Save the SVG
+        dwg.save()
+        return True
+```
+
+## Layer Serialization
+
+Layers need to be serialized for saving and loading projects:
+
+```python
+# Example project file format (.geometron)
+{
+    "version": "1.0",
+    "canvas": {
+        "width": 800,
+        "height": 600,
+        "units": "px"
+    },
+    "layers": [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "Torus Layer",
+            "algorithm": "Torus Generator",
+            "parameters": {
+                "torusRadius": 150,
+                "tubeRadius": 50,
+                "resolution": 72,
+                "tubeResolution": 36,
+                "showLongitudinal": true,
+                "showLatitudinal": true,
+                "showSpiral": false,
+                "showCounterSpiral": false
+            },
+            "visible": true,
+            "locked": false,
+            "position": [0, 0],
+            "scale": [1, 1],
+            "rotation": 0,
+            "line_color": [0, 0, 0],
+            "line_weight": 1.0
+        },
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440001",
+            "name": "Interpolated Circle",
+            "algorithm": "Interpolated Circle",
+            "parameters": {
+                "n": 7,
+                "offset": 2.0,
+                "numShrinkingDuplicates": 5,
+                "numGrowingDuplicates": 5,
+                "initialScaleOffset": 1.1,
+                "scaleDecay": 0.9,
+                "fluctuationAmount": 0.1
+            },
+            "visible": true,
+            "locked": false,
+            "position": [50, 100],
+            "scale": [0.8, 0.8],
+            "rotation": 45,
+            "line_color": [255, 0, 0],
+            "line_weight": 0.5
+        }
+    ],
+    "active_layer_index": 1
+}
+```
+
+## Implementation Strategy
+
+1. **Core Classes**:
+   - Implement Layer and LayerManager classes
+   - Create basic serialization/deserialization
+
+2. **UI Components**:
+   - Build LayerPanel for managing layers
+   - Create LayerPropertiesPanel for editing
+
+3. **Integration**:
+   - Connect with Algorithm Framework
+   - Integrate with Canvas Rendering
+
+4. **Advanced Features**:
+   - Layer Groups
+   - Layer Blending Modes
+   - Layer Effects
