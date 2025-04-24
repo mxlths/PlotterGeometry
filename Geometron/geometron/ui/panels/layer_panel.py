@@ -12,6 +12,7 @@ class LayerPanel(QWidget):
     
     # Signal to request adding a new layer (could eventually pass algorithm type)
     add_layer_requested = pyqtSignal() 
+    parameter_focus_requested = pyqtSignal() # Signal to focus parameter panel
 
     def __init__(self, layer_manager: LayerManager, parent=None):
         super().__init__(parent)
@@ -44,6 +45,7 @@ class LayerPanel(QWidget):
         # Connect signals for selection and reordering
         self.layer_list.currentRowChanged.connect(self.on_layer_selection_changed)
         self.layer_list.model().rowsMoved.connect(self.on_layer_reordered)
+        self.layer_list.itemDoubleClicked.connect(self.on_layer_double_clicked) # Connect double-click
         
         layout.addWidget(self.layer_list)
         
@@ -74,9 +76,13 @@ class LayerPanel(QWidget):
 
     def refresh_layer_list(self):
         """Update the layer list UI from the layer manager."""
-        if self._is_refreshing: return # Avoid recursive calls
+        print("--- Refreshing Layer List UI ---") # DEBUG
+        if self._is_refreshing: 
+            print("DEBUG: Already refreshing, returning.") # DEBUG
+            return 
 
         self._is_refreshing = True
+        print(f"DEBUG: Manager has {len(self.layer_manager.layers)} layers.") # DEBUG
         
         # Store current selection if possible
         current_index = self.layer_list.currentRow()
@@ -87,13 +93,18 @@ class LayerPanel(QWidget):
                  selected_layer_id = item.data(Qt.ItemDataRole.UserRole)
 
         self.layer_list.clear()
+        print("DEBUG: List cleared.") # DEBUG
         
         # Populate list in reverse order (top layer = top of list)
+        if not self.layer_manager.layers:
+             print("DEBUG: No layers in manager to display.") # DEBUG
+             
         for i, layer in enumerate(reversed(self.layer_manager.layers)):
             original_index = len(self.layer_manager.layers) - 1 - i
+            print(f"DEBUG: Adding item for layer: {layer.name} (Original Index: {original_index})") # DEBUG
             item = QListWidgetItem(layer.name)
             # Store the layer's unique ID in the item data
-            item.setData(Qt.ItemDataRole.UserRole, layer.id) 
+            item.setData(Qt.ItemDataRole.UserRole, layer.id)
             
             # TODO: Add icons for visibility/lock state
             font = item.font()
@@ -105,6 +116,7 @@ class LayerPanel(QWidget):
             
             self.layer_list.addItem(item)
 
+        print(f"DEBUG: List count after adding: {self.layer_list.count()}") # DEBUG
         # Restore selection based on ID
         if selected_layer_id:
              for i in range(self.layer_list.count()):
@@ -118,6 +130,7 @@ class LayerPanel(QWidget):
         
         self._is_refreshing = False
         self.update_button_states()
+        print("--- Layer List Refresh Complete ---") # DEBUG
 
 
     def update_selection(self, active_layer: Layer | None):
@@ -230,6 +243,13 @@ class LayerPanel(QWidget):
         # Manager emits layers_changed, which triggers refresh_layer_list
 
 
+    def on_layer_double_clicked(self, item: QListWidgetItem):
+        """Handle double-click: select the layer and request parameter focus."""
+        # Selection should already be handled by single click signal, just emit focus request
+        print("DEBUG: Layer double-clicked, requesting parameter focus.")
+        self.parameter_focus_requested.emit()
+
+
     def on_add_layer(self):
         """Handle add layer button click by showing the algorithm selection dialog."""
         # Create and execute the dialog
@@ -269,7 +289,3 @@ class LayerPanel(QWidget):
         has_selection = self.layer_manager.active_layer_index != -1
         self.duplicate_btn.setEnabled(has_selection)
         self.delete_btn.setEnabled(has_selection)
-
-
-```
-```

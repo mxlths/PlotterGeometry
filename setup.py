@@ -3,7 +3,9 @@ from setuptools import setup, find_packages
 setup(
     name="geometron",
     version="0.1.0",
-    packages=find_packages(),
+    # Tell find_packages where the source code is relative to setup.py
+    package_dir={'': 'Geometron'},
+    packages=find_packages(where='Geometron'),
     install_requires=[
         "numpy",
         "scipy",

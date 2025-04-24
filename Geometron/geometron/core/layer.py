@@ -15,55 +15,102 @@ class Vector2D:
         self.x = x
         self.y = y
 
-@dataclass
+# --- Reinstating Layer class structure from e932368c --- 
 class Layer:
-    """A layer containing geometry and associated properties.
+    """Represents a single layer in the composition."""
     
-    Attributes:
-        name: Layer name
-        geometry: Group containing all geometry in this layer
-        visible: Whether the layer is visible
-        locked: Whether the layer is locked for editing
-        opacity: Layer opacity (0.0 to 1.0)
-        transform: Transformation matrix for the entire layer
-    """
-    name: str
-    geometry: Group
-    visible: bool = True
-    locked: bool = False
-    opacity: float = 1.0
-    transform: Optional[np.ndarray] = None
-    
-    def __post_init__(self):
-        """Initialize default values."""
-        if self.transform is None:
-            # Determine if layer contains 3D geometry
-            is_3d = any(hasattr(elem, 'is_3d') and elem.is_3d 
-                       for elem in self.geometry.elements)
-            self.transform = np.eye(4 if is_3d else 3)
-    
-    def apply_transform(self, matrix: np.ndarray) -> None:
-        """Apply a transformation to the layer.
+    def __init__(self, algorithm: Optional[AlgorithmBase] = None, name: Optional[str] = None):
+        self.id = uuid.uuid4()  # Unique identifier
+        self.algorithm = algorithm # Store the algorithm *instance*
+        self.parameters = {} # Parameters specific to this layer instance
+        if self.algorithm:
+             # Initialize parameters with defaults from the algorithm class
+             for param_def in self.algorithm.get_parameters():
+                 self.parameters[param_def.name] = param_def.default
+             self.name = name or self.algorithm.get_name() # Default name from algo
+        else:
+             self.name = name or f"Layer {str(self.id)[:4]}"
+             
+        self.visible = True
+        self.locked = False
         
-        Args:
-            matrix: Transformation matrix to apply
-        """
-        self.transform = matrix @ self.transform
-    
-    def to_dict(self) -> Dict[str, Any]:
+        # Transformation properties
+        self.position = Vector2D(0, 0)
+        self.scale = Vector2D(1, 1)
+        self.rotation = 0.0  # In degrees
+        
+        # Styling properties
+        self.line_color = (0, 0, 0)  # RGB tuple (0-255)
+        self.line_weight = 1.0
+        
+        # Cache - Placeholder for now
+        self.geometry_cache = None
+        self.needs_update = True
+        
+    def set_parameter(self, param_name: str, value: Any):
+        """Set a parameter value and mark layer for update."""
+        if param_name in self.parameters:
+             if self.parameters[param_name] != value:
+                 self.parameters[param_name] = value
+                 self.needs_update = True
+                 # LayerManager should emit layer_updated after this call
+        else:
+             print(f"Warning: Parameter '{param_name}' not found for layer '{self.name}'")
+             
+    def update_geometry(self):
+        """Regenerate geometry if needed."""
+        if self.needs_update and self.algorithm:
+            try:
+                self.geometry_cache = self.algorithm.generate_geometry(self.parameters)
+                self.needs_update = False
+                print(f"Layer '{self.name}' geometry updated.")
+            except Exception as e:
+                 print(f"Error generating geometry for layer '{self.name}': {e}")
+                 self.geometry_cache = None # Ensure cache is cleared on error
+                 # Keep needs_update True so it retries later?
+        elif not self.algorithm:
+             self.geometry_cache = None
+             self.needs_update = False # Nothing to update
+
+    def get_geometry(self):
+        """Get the transformed geometry of this layer."""
+        self.update_geometry() # Ensure cache is up-to-date
+        
+        if self.geometry_cache:
+            # TODO: Implement actual geometry transformation
+            # Create a copy of the geometry
+            # transformed = self.geometry_cache.copy()
+            
+            # Apply transformations (using matrix math eventually)
+            # transform_matrix = Matrix.identity()
+            # transform_matrix.translate(self.position.x, self.position.y)
+            # transform_matrix.rotate(math.radians(self.rotation))
+            # transform_matrix.scale(self.scale.x, self.scale.y)
+            # transformed.transform(transform_matrix)
+            # return transformed
+            return self.geometry_cache # Return untransformed for now
+            
+        return None
+
+    def as_dict(self):
         """Convert layer to dictionary for serialization."""
         return {
-            'name': self.name,
-            'visible': self.visible,
-            'locked': self.locked,
-            'opacity': self.opacity,
-            'transform': self.transform.tolist(),
-            # Geometry serialization will be handled by geometry classes
+            "id": str(self.id),
+            "name": self.name,
+            "algorithm_name": self.algorithm.get_name() if self.algorithm else None,
+            "parameters": self.parameters,
+            "visible": self.visible,
+            "locked": self.locked,
+            "position": [self.position.x, self.position.y],
+            "scale": [self.scale.x, self.scale.y],
+            "rotation": self.rotation,
+            "line_color": list(self.line_color),
+            "line_weight": self.line_weight
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any], registry: AlgorithmRegistry) -> 'Layer | None':
-        """Create layer from dictionary."""
+        """Create a layer from serialized data using the registry."""
         algo_name = data.get("algorithm_name")
         algorithm_instance = None
         if algo_name:
@@ -74,44 +121,32 @@ class Layer:
                  # return None 
 
         # Create layer, passing the algorithm instance
-        layer = cls(
-            name=data.get("name"),
-            geometry=Group([]),  # Placeholder, geometry loaded separately
-            visible=data.get('visible', True),
-            locked=data.get('locked', False),
-            opacity=data.get('opacity', 1.0),
-            transform=np.array(data.get('transform', None))
-        )
+        layer = cls(algorithm=algorithm_instance, name=data.get("name"))
         
         layer.id = uuid.UUID(data.get("id", str(uuid.uuid4()))) # Ensure ID exists
-        layer.algorithm = algorithm_instance # Store the algorithm *instance*
-        layer.parameters = data.get("parameters", {}) # Parameters specific to this layer instance
-        if layer.algorithm:
-             # Initialize parameters with defaults from the algorithm class
-             for param_def in layer.algorithm.get_parameters():
-                 layer.parameters[param_def.name] = param_def.default
-             layer.name = layer.name or layer.algorithm.get_name() # Default name from algo
-        else:
-             layer.name = layer.name or f"Layer {str(layer.id)[:4]}"
+        layer.visible = data.get("visible", True)
+        layer.locked = data.get("locked", False)
         
-        # Transformation properties
         pos = data.get("position", [0, 0])
         layer.position = Vector2D(pos[0], pos[1])
+        
         scale = data.get("scale", [1, 1])
         layer.scale = Vector2D(scale[0], scale[1])
-        layer.rotation = data.get("rotation", 0.0) # In degrees
         
-        # Styling properties
+        layer.rotation = data.get("rotation", 0.0)
+        
         layer.line_color = tuple(data.get("line_color", [0, 0, 0]))
         layer.line_weight = data.get("line_weight", 1.0)
         
-        # Cache - Placeholder for now
-        layer.geometry_cache = None
-        layer.needs_update = True
+        # Set parameters *after* creating layer with defaults
+        layer.parameters = data.get("parameters", {}) 
+        # We might want to validate loaded parameters against algorithm definition here
         
+        layer.needs_update = True # Assume update needed after loading
         return layer
+# --- End Reinstated Layer Class --- 
 
-
+# --- LayerManager remains the same --- 
 class LayerManager(QObject):
     """Manages a collection of layers and their ordering.
     
@@ -119,6 +154,13 @@ class LayerManager(QObject):
         layers: List of layers in order from bottom to top
         active_layer: Currently selected layer
     """
+
+    # --- Define Signals as Class Attributes --- #
+    layers_changed = pyqtSignal() # Emitted when layers are added, removed, or reordered
+    active_layer_changed = pyqtSignal(object) # Emitted with the new active Layer object (or None)
+    layer_updated = pyqtSignal(object) # Emitted with the updated Layer object
+    # --- End Signal Definitions --- #
+
     def __init__(self, algorithm_registry: AlgorithmRegistry):
         super().__init__()
         self.layers: List[Layer] = []
@@ -367,4 +409,4 @@ class LayerManager(QObject):
              manager._active_layer_index = -1 if len(manager.layers) == 0 else 0
 
         print(f"Loaded {len(manager.layers)} layers. Active index: {manager._active_layer_index}")
-        return manager 
+        return manager
